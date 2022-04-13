@@ -3,7 +3,7 @@ use bollard::container::{
 };
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use bollard::models::{ContainerCreateResponse, ContainerSummary, CreateImageInfo, HostConfig};
-use bollard::Docker;
+pub use bollard::Docker;
 use futures_util::TryStreamExt;
 
 use std::collections::HashMap;

@@ -14,6 +14,7 @@ pub static MAX_CONTAINER_RUNNING_TIME: i64 = 60 * 60 * 24;
 /// Maxmium container running count
 pub static MAX_CONTAINERS: usize = 10;
 
+#[derive(Clone)]
 pub struct DockerRunner {
     pub docker: Docker,
     pub max_container_running_time: i64,

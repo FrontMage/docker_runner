@@ -1,47 +1,142 @@
 use bollard::container::{
-    Config, InspectContainerOptions, ListContainersOptions, StopContainerOptions,
+    Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
 };
-use bollard::models::ContainerSummary;
+use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
+use bollard::models::{ContainerCreateResponse, ContainerSummary, CreateImageInfo, HostConfig};
 use bollard::Docker;
-
-use bollard::exec::{CreateExecOptions, StartExecResults};
-use bollard::image::CreateImageOptions;
-use chrono::{DateTime, NaiveDateTime, Utc};
-use futures_util::stream;
-use futures_util::stream::StreamExt;
 use futures_util::TryStreamExt;
+
 use std::collections::HashMap;
-use tokio::runtime::Builder;
 
 /// Maxmium time in seconds of a container that can stay running
-pub static MAX_CONTAINER_RUNNING_TIME: i64 = 60 * 60 * 1;
+pub static MAX_CONTAINER_RUNNING_TIME: i64 = 60 * 60 * 24;
 
-/// All runner container must use this tag to filter out
-pub static CONTAINER_LABEL: &'static str = "is_runner_container=true";
+/// Maxmium container running count
+pub static MAX_CONTAINERS: usize = 10;
 
 pub struct DockerRunner {
     pub docker: Docker,
-    pub containers: Vec<ContainerSummary>,
+    pub max_container_running_time: i64,
+    pub container_label_key: String,
+    pub container_label_value: String,
+    pub max_containers: usize,
 }
 
 impl DockerRunner {
-    pub fn new(docker: Docker) -> Self {
+    pub fn new(
+        docker: Docker,
+        max_container_running_time: i64,
+        container_label_key: String,
+        container_label_value: String,
+        max_containers: usize,
+    ) -> Self {
         return DockerRunner {
             docker,
-            containers: vec![],
+            max_container_running_time,
+            container_label_key,
+            container_label_value,
+            max_containers,
         };
     }
 
     /// Create container
-    pub async fn run(&self, image: &str, args: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // self.docker.create_container();
-        unimplemented!("");
+    pub async fn run(
+        &self,
+        image: &str,
+        cmd: Vec<&str>,
+    ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
+        let options = Some(CreateImageOptions {
+            from_image: image,
+            ..Default::default()
+        });
+
+        let msg: Vec<CreateImageInfo> = self
+            .docker
+            .create_image(options.clone(), None, None)
+            .try_collect()
+            .await?;
+        log::info!("Pulling image: {:?}", msg);
+        let mut labels: HashMap<&str, &str> = HashMap::new();
+        labels.insert(&self.container_label_key, &self.container_label_value);
+        let host_config = HostConfig {
+            auto_remove: Some(true),
+            ..Default::default()
+        };
+        let cfg = Config {
+            image: Some(image),
+            cmd: Some(cmd),
+            labels: Some(labels),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+        let options: Option<CreateContainerOptions<&str>> = None;
+        let resp = self.docker.create_container(options, cfg).await?;
+        self.docker
+            .start_container(&resp.id, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(resp)
+    }
+
+    /// Clear image by whitlist
+    pub async fn clear_images_by_whitelist(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let filters: HashMap<&str, Vec<&str>> = HashMap::new();
+        let options = Some(ListImagesOptions {
+            filters,
+            ..Default::default()
+        });
+        let images = self.docker.list_images(options).await?;
+        for image in images {
+            // FIXME: This should be a whitlist, now just exclude the helium miner
+            if image.id != "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0"
+            {
+                let remove_options = Some(RemoveImageOptions {
+                    ..Default::default()
+                });
+
+                if let Err(e) = self
+                    .docker
+                    .remove_image(&image.id, remove_options, None)
+                    .await
+                {
+                    log::warn!("Failed to clear old image {}, {:?}", image.id, e);
+                } else {
+                    log::info!("Cleared old image {}", image.id);
+                }
+            }
+        }
         Ok(())
     }
 
-    /// Clear old images
-    pub async fn clear_images(&self) -> Result<(), Box<dyn std::error::Error>> {
-        unimplemented!("");
+    /// Clear image by tag
+    pub async fn clear_images_by_tag(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut filters = HashMap::new();
+        let label = format!(
+            "{}={}",
+            self.container_label_key, self.container_label_value
+        );
+        filters.insert("label", vec![label.as_str()]);
+        let options = Some(ListImagesOptions {
+            all: true,
+            filters,
+            ..Default::default()
+        });
+        let images = self.docker.list_images(options).await?;
+        for image in images {
+            let remove_options = Some(RemoveImageOptions {
+                noprune: true,
+                ..Default::default()
+            });
+
+            if let Err(e) = self
+                .docker
+                .remove_image(&image.id, remove_options, None)
+                .await
+            {
+                log::warn!("Failed to clear old image {}, {:?}", image.id, e);
+            } else {
+                log::info!("Cleared old image {}", image.id);
+            }
+        }
         Ok(())
     }
 
@@ -50,17 +145,24 @@ impl DockerRunner {
         for container_info in self.list_runner_containers().await? {
             let container_created_timestamp = container_info.created.unwrap_or(0);
             let now = chrono::offset::Local::now().timestamp();
-            if (now - container_created_timestamp) > MAX_CONTAINER_RUNNING_TIME {
-                // TODO: maybe sometimes container won't stop? Require force stop?
+            if (now - container_created_timestamp) > self.max_container_running_time {
                 for name in container_info.names.unwrap() {
-                    self.docker.stop_container(&name, None).await?;
+                    // FIXME: The return value of name is /charming_leakey with a / at the front,
+                    // but the stop_container method expect a name without /
+                    if let Err(e) = self
+                        .docker
+                        .stop_container(&name.trim_start_matches("/"), None)
+                        .await
+                    {
+                        log::warn!("Failed to clear container {}, {:?}", name, e);
+                    }
                 }
-                println!(
+                log::info!(
                     "Clear container {} for timeout",
                     container_info.id.unwrap_or("No id found".into())
                 );
             } else {
-                println!(
+                log::info!(
                     "Skip running container {}",
                     container_info.id.unwrap_or("No id found".into())
                 );
@@ -73,20 +175,13 @@ impl DockerRunner {
         &self,
     ) -> Result<Vec<ContainerSummary>, Box<dyn std::error::Error>> {
         let mut filters = HashMap::new();
-        filters.insert("label".to_string(), vec![CONTAINER_LABEL.to_string()]);
-        let opts: ListContainersOptions<String> = ListContainersOptions {
-            all: true,
-            filters,
-            ..Default::default()
-        };
-
-        Ok(self.docker.list_containers(Some(opts)).await?)
-    }
-
-    pub async fn list_running_containers(
-        &self,
-    ) -> Result<Vec<ContainerSummary>, Box<dyn std::error::Error>> {
-        let mut filters = HashMap::new();
+        filters.insert(
+            "label".to_string(),
+            vec![format!(
+                "{}={}",
+                self.container_label_key, self.container_label_value
+            )],
+        );
         filters.insert("status".to_string(), vec!["running".to_string()]);
         let opts: ListContainersOptions<String> = ListContainersOptions {
             all: true,
@@ -101,17 +196,34 @@ impl DockerRunner {
 #[cfg(test)]
 mod tests {
 
+    use simplelog::*;
+    use std::time::Duration;
+
     use super::*;
-    #[test]
-    fn test_get_all_containers() {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
+    #[tokio::test]
+    async fn test_runner_basic_functions() {
+        CombinedLogger::init(vec![TermLogger::new(
+            LevelFilter::Info,
+            simplelog::Config::default(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        )])
+        .unwrap();
+        let docker = Docker::connect_with_socket_defaults().unwrap();
+        let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
+        // dr.clear_images_by_whitelist().await.unwrap();
+        dr.run("busybox:latest", vec!["sleep", "100"])
+            .await
             .unwrap();
-        rt.block_on(async {
-            let docker = Docker::connect_with_socket_defaults().unwrap();
-            let dr = DockerRunner::new(docker);
-            dr.clear_timeout_containers().await.unwrap();
-        });
+        dr.run("busybox:latest", vec!["sleep", "100"])
+            .await
+            .unwrap();
+        dr.run("busybox:latest", vec!["sleep", "100"])
+            .await
+            .unwrap();
+        assert_eq!(3, dr.list_runner_containers().await.unwrap().len());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        dr.clear_timeout_containers().await.unwrap();
+        assert_eq!(0, dr.list_runner_containers().await.unwrap().len());
     }
 }

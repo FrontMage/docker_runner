@@ -3,6 +3,8 @@
 usage
 
 ```rust
+use docker_runner::{Docker, DockerRunner};
+use std::time::Duration;
 let docker = Docker::connect_with_socket_defaults().unwrap();
 // change the max_container_running_time to desire value
 let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);

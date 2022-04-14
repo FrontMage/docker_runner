@@ -44,7 +44,7 @@ impl DockerRunner {
     pub async fn run(
         &self,
         image: &str,
-        cmd: Vec<&str>,
+        cmd: Option<Vec<&str>>,
     ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
         let options = Some(CreateImageOptions {
             from_image: image,
@@ -65,7 +65,7 @@ impl DockerRunner {
         };
         let cfg = Config {
             image: Some(image),
-            cmd: Some(cmd),
+            cmd,
             labels: Some(labels),
             host_config: Some(host_config),
             ..Default::default()
@@ -213,13 +213,13 @@ mod tests {
         let docker = Docker::connect_with_socket_defaults().unwrap();
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
         // dr.clear_images_by_whitelist().await.unwrap();
-        dr.run("busybox:latest", vec!["sleep", "100"])
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
             .await
             .unwrap();
-        dr.run("busybox:latest", vec!["sleep", "100"])
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
             .await
             .unwrap();
-        dr.run("busybox:latest", vec!["sleep", "100"])
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
             .await
             .unwrap();
         assert_eq!(3, dr.list_runner_containers().await.unwrap().len());

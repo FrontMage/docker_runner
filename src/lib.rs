@@ -51,12 +51,10 @@ impl DockerRunner {
             ..Default::default()
         });
 
-        let msg: Vec<CreateImageInfo> = self
-            .docker
-            .create_image(options.clone(), None, None)
-            .try_collect()
-            .await?;
-        log::info!("Pulling image: {:?}", msg);
+        let mut stream = self.docker.create_image(options.clone(), None, None);
+        while let Some(msg) = stream.try_next().await? {
+            log::info!("Pulling image: {:?}", msg);
+        }
         let mut labels: HashMap<&str, &str> = HashMap::new();
         labels.insert(&self.container_label_key, &self.container_label_value);
         let host_config = HostConfig {
@@ -79,17 +77,23 @@ impl DockerRunner {
     }
 
     /// Clear image by whitlist
-    pub async fn clear_images_by_whitelist(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn clear_images_by_whitelist(
+        &self,
+        whitelist: Vec<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
             filters,
             ..Default::default()
         });
+        let whitelist_map = whitelist
+            .iter()
+            .map(|hash| (hash.clone(), true))
+            .collect::<HashMap<&str, bool>>();
         let images = self.docker.list_images(options).await?;
         for image in images {
             // FIXME: This should be a whitlist, now just exclude the helium miner
-            if image.id != "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0"
-            {
+            if whitelist_map.contains_key(image.id.as_str()) {
                 let remove_options = Some(RemoveImageOptions {
                     ..Default::default()
                 });

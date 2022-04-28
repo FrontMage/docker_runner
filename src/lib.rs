@@ -1,10 +1,15 @@
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
 };
+use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
-use bollard::models::{ContainerCreateResponse, ContainerSummary, CreateImageInfo, HostConfig};
+use bollard::models::{
+    ContainerCreateResponse, ContainerSummary, HostConfig, SystemEventsResponse,
+};
+use bollard::system::EventsOptions;
 pub use bollard::Docker;
-use futures_util::TryStreamExt;
+use chrono::{Duration, Utc};
+use futures_util::{Stream, TryStreamExt};
 
 use std::collections::HashMap;
 
@@ -196,15 +201,42 @@ impl DockerRunner {
 
         Ok(self.docker.list_containers(Some(opts)).await?)
     }
+
+    pub async fn events(
+        &self,
+        filters: HashMap<String, Vec<String>>,
+    ) -> Result<impl Stream<Item = Result<SystemEventsResponse, Error>>, Box<dyn std::error::Error>>
+    {
+        Ok(self.docker.events(Some(EventsOptions::<String> {
+            since: Some(Utc::now() - Duration::minutes(20)),
+            until: None,
+            filters,
+        })))
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
     use simplelog::*;
-    use std::time::Duration;
 
     use super::*;
+    use std::collections::HashMap;
+    #[tokio::test]
+    async fn test_events() {
+        let docker = Docker::connect_with_socket_defaults().unwrap();
+        let mut filters: HashMap<String, Vec<String>> = HashMap::new();
+        filters.insert("event".into(), vec!["destroy".to_string()]);
+        filters.insert("type".into(), vec!["container".to_string()]);
+        let mut s = docker.events(Some(EventsOptions::<String> {
+            since: Some(Utc::now() - Duration::minutes(20)),
+            until: None,
+            filters,
+        }));
+        while let Ok(event) = s.try_next().await {
+            println!("{:?}", event);
+        }
+    }
     #[tokio::test]
     async fn test_runner_basic_functions() {
         CombinedLogger::init(vec![TermLogger::new(
@@ -227,7 +259,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(3, dr.list_runner_containers().await.unwrap().len());
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         dr.clear_timeout_containers().await.unwrap();
         assert_eq!(0, dr.list_runner_containers().await.unwrap().len());
     }

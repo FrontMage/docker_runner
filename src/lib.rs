@@ -114,8 +114,7 @@ impl DockerRunner {
             .await?;
 
         // set stdout in raw mode so we can do tty stuff
-        let stdout = stdout();
-        let mut stdout = stdout.lock();
+        let mut stdout = stdout();
 
         // pipe docker attach output into stdout
         while let Some(Ok(output)) = output.next().await {

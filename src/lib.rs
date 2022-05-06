@@ -1,16 +1,17 @@
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
+    AttachContainerOptions, AttachContainerResults, Config, CreateContainerOptions,
+    ListContainersOptions, StartContainerOptions,
 };
 use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use bollard::models::{
-    ContainerCreateResponse, ContainerSummary, HostConfig, Mount, MountTypeEnum,
-    SystemEventsResponse,
+    ContainerCreateResponse, ContainerSummary, EventMessage, HostConfig, Mount, MountTypeEnum,
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
 use chrono::{Duration, Utc};
-use futures_util::{Stream, TryStreamExt};
+use futures_util::{Stream, StreamExt, TryStreamExt};
+use std::io::{stdout, Read, Write};
 
 use std::collections::HashMap;
 
@@ -95,6 +96,32 @@ impl DockerRunner {
         self.docker
             .start_container(&resp.id, None::<StartContainerOptions<String>>)
             .await?;
+
+        let AttachContainerResults {
+            mut output,
+            input: _,
+        } = self
+            .docker
+            .attach_container(
+                &resp.id,
+                Some(AttachContainerOptions::<String> {
+                    stdout: Some(true),
+                    stderr: Some(true),
+                    stream: Some(true),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        // set stdout in raw mode so we can do tty stuff
+        let stdout = stdout();
+        let mut stdout = stdout.lock();
+
+        // pipe docker attach output into stdout
+        while let Some(Ok(output)) = output.next().await {
+            stdout.write_all(output.into_bytes().as_ref())?;
+            stdout.flush()?;
+        }
         Ok(resp)
     }
 
@@ -222,8 +249,7 @@ impl DockerRunner {
     pub async fn events(
         &self,
         filters: HashMap<String, Vec<String>>,
-    ) -> Result<impl Stream<Item = Result<SystemEventsResponse, Error>>, Box<dyn std::error::Error>>
-    {
+    ) -> Result<impl Stream<Item = Result<EventMessage, Error>>, Box<dyn std::error::Error>> {
         Ok(self.docker.events(Some(EventsOptions::<String> {
             since: Some(Utc::now() - Duration::minutes(20)),
             until: None,

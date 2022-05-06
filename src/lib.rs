@@ -70,7 +70,7 @@ impl DockerRunner {
                 mounts
                     .unwrap_or(vec![])
                     .iter()
-                    .map(|(target, source)| Mount {
+                    .map(|(source, target)| Mount {
                         target: Some(String::from(target)),
                         source: Some(String::from(source)),
                         typ: Some(MountTypeEnum::BIND),
@@ -267,31 +267,31 @@ mod tests {
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
         // dr.clear_images_by_whitelist().await.unwrap();
         dr.run(
-            "busybox:latest",
-            Some(vec!["sleep", "100"]),
+            "xbgxwh/github_star",
+            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
             Some(vec![(
-                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
-                "/".into(),
+                "/Users/xinbiguo/Documents/github_star_bot/token".into(),
+                "/github_token".into(),
             )]),
         )
         .await
         .unwrap();
         dr.run(
-            "busybox:latest",
-            Some(vec!["sleep", "100"]),
+            "xbgxwh/github_star",
+            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
             Some(vec![(
-                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
-                "/".into(),
+                "/Users/xinbiguo/Documents/github_star_bot/token2".into(),
+                "/github_token".into(),
             )]),
         )
         .await
         .unwrap();
         dr.run(
-            "busybox:latest",
-            Some(vec!["sleep", "100"]),
+            "xbgxwh/github_star",
+            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
             Some(vec![(
-                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
-                "/".into(),
+                "/Users/xinbiguo/Documents/github_star_bot/token3".into(),
+                "/github_token".into(),
             )]),
         )
         .await

@@ -4,7 +4,8 @@ use bollard::container::{
 use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use bollard::models::{
-    ContainerCreateResponse, ContainerSummary, HostConfig, SystemEventsResponse,
+    ContainerCreateResponse, ContainerSummary, HostConfig, Mount, MountTypeEnum,
+    SystemEventsResponse,
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
@@ -50,6 +51,7 @@ impl DockerRunner {
         &self,
         image: &str,
         cmd: Option<Vec<&str>>,
+        mounts: Option<Vec<(String, String)>>,
     ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
         let options = Some(CreateImageOptions {
             from_image: image,
@@ -64,6 +66,19 @@ impl DockerRunner {
         labels.insert(&self.container_label_key, &self.container_label_value);
         let host_config = HostConfig {
             auto_remove: Some(true),
+            mounts: Some(
+                mounts
+                    .unwrap_or(vec![])
+                    .iter()
+                    .map(|(target, source)| Mount {
+                        target: Some(String::from(target)),
+                        source: Some(String::from(source)),
+                        typ: Some(MountTypeEnum::BIND),
+                        consistency: Some(String::from("default")),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
             ..Default::default()
         };
         let cfg = Config {
@@ -71,6 +86,8 @@ impl DockerRunner {
             cmd,
             labels: Some(labels),
             host_config: Some(host_config),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
             ..Default::default()
         };
         let options: Option<CreateContainerOptions<&str>> = None;
@@ -249,15 +266,36 @@ mod tests {
         let docker = Docker::connect_with_socket_defaults().unwrap();
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
         // dr.clear_images_by_whitelist().await.unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
-            .await
-            .unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
-            .await
-            .unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]))
-            .await
-            .unwrap();
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            Some(vec![(
+                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
+                "/".into(),
+            )]),
+        )
+        .await
+        .unwrap();
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            Some(vec![(
+                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
+                "/".into(),
+            )]),
+        )
+        .await
+        .unwrap();
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            Some(vec![(
+                "/Users/xinbiguo/Documents/docker_runner/Cargo.toml".into(),
+                "/".into(),
+            )]),
+        )
+        .await
+        .unwrap();
         assert_eq!(3, dr.list_runner_containers().await.unwrap().len());
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         dr.clear_timeout_containers().await.unwrap();

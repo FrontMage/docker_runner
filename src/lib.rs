@@ -11,7 +11,7 @@ use bollard::system::EventsOptions;
 pub use bollard::Docker;
 use chrono::{Duration, Utc};
 use futures_util::{Stream, StreamExt, TryStreamExt};
-use std::io::{stdout, Read, Write};
+use std::io::{stdout, Write};
 
 use std::collections::HashMap;
 

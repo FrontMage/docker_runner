@@ -140,8 +140,7 @@ impl DockerRunner {
             .collect::<HashMap<&str, bool>>();
         let images = self.docker.list_images(options).await?;
         for image in images {
-            // FIXME: This should be a whitlist, now just exclude the helium miner
-            if whitelist_map.contains_key(image.id.as_str()) {
+            if !whitelist_map.contains_key(image.id.as_str()) {
                 let remove_options = Some(RemoveImageOptions {
                     ..Default::default()
                 });
@@ -264,6 +263,19 @@ mod tests {
 
     use super::*;
     use std::collections::HashMap;
+    #[tokio::test]
+    async fn test_clear_images() {
+        CombinedLogger::init(vec![TermLogger::new(
+            LevelFilter::Info,
+            simplelog::Config::default(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        )])
+        .unwrap();
+        let docker = Docker::connect_with_socket_defaults().unwrap();
+        let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
+        dr.clear_images_by_whitelist(vec![]).await.unwrap();
+    }
     #[tokio::test]
     async fn test_events() {
         let docker = Docker::connect_with_socket_defaults().unwrap();

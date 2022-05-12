@@ -67,6 +67,8 @@ impl DockerRunner {
         labels.insert(&self.container_label_key, &self.container_label_value);
         let host_config = HostConfig {
             auto_remove: Some(true),
+            // 1GB limit
+            memory: Some(1073741824),
             mounts: Some(
                 mounts
                     .unwrap_or(vec![])
@@ -131,6 +133,7 @@ impl DockerRunner {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
+            all: false,
             filters,
             ..Default::default()
         });
@@ -302,7 +305,18 @@ mod tests {
         .unwrap();
         let docker = Docker::connect_with_socket_defaults().unwrap();
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
-        // dr.clear_images_by_whitelist().await.unwrap();
+        dr.clear_images_by_whitelist(vec![
+            // helium miner
+            "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0",
+            // oracle price
+            "sha256:2ad5168849b8efca452835a64fa687c687be82f7a13708a26f97330bdfa6d09c",
+            // wrk
+            "sha256:00af8c6b99adbadc465f42f9dcc8b0f10e397dbcae4fb71966126a0834f3a3f5",
+            // github star
+            "sha256:066003b681db10eca929503a4de0b4859468dceaaf57c30749fff77dd397bef9",
+        ])
+        .await
+        .unwrap();
         dr.run(
             "xbgxwh/github_star",
             Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),

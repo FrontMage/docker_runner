@@ -241,7 +241,7 @@ impl DockerRunner {
                 }
             }
             log::info!(
-                "Clear container {} for timeout",
+                "Clear container {} for reset",
                 container_info.id.unwrap_or("No id found".into())
             );
         }

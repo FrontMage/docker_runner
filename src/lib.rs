@@ -226,6 +226,28 @@ impl DockerRunner {
         Ok(())
     }
 
+    /// Clear all containers
+    pub async fn clear_all_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for container_info in self.list_runner_containers().await? {
+            for name in container_info.names.unwrap() {
+                // FIXME: The return value of name is /charming_leakey with a / at the front,
+                // but the stop_container method expect a name without /
+                if let Err(e) = self
+                    .docker
+                    .stop_container(&name.trim_start_matches("/"), None)
+                    .await
+                {
+                    log::warn!("Failed to clear container {}, {:?}", name, e);
+                }
+            }
+            log::info!(
+                "Clear container {} for timeout",
+                container_info.id.unwrap_or("No id found".into())
+            );
+        }
+        Ok(())
+    }
+
     pub async fn list_runner_containers(
         &self,
     ) -> Result<Vec<ContainerSummary>, Box<dyn std::error::Error>> {

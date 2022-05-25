@@ -66,6 +66,7 @@ impl DockerRunner {
         let mut labels: HashMap<&str, &str> = HashMap::new();
         labels.insert(&self.container_label_key, &self.container_label_value);
         let host_config = HostConfig {
+            cap_add: Some(vec!["SYS_ADMIN".into()]),
             auto_remove: Some(true),
             // 1GB limit
             memory: Some(1073741824),

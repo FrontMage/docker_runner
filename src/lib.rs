@@ -54,14 +54,30 @@ impl DockerRunner {
         cmd: Option<Vec<&str>>,
         mounts: Option<Vec<(String, String)>>,
     ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
-        let options = Some(CreateImageOptions {
-            from_image: image,
+        let filters: HashMap<&str, Vec<&str>> = HashMap::new();
+        let options = Some(ListImagesOptions {
+            all: false,
+            filters,
             ..Default::default()
         });
+        let images = self.docker.list_images(options).await?;
+        // Pull image if image is not already exitsting
+        if !images
+            .iter()
+            .map(|image_summary| image_summary.repo_tags.clone())
+            .flatten()
+            .collect::<Vec<String>>()
+            .contains(&image.to_string())
+        {
+            let options = Some(CreateImageOptions {
+                from_image: image,
+                ..Default::default()
+            });
 
-        let mut stream = self.docker.create_image(options.clone(), None, None);
-        while let Some(msg) = stream.try_next().await? {
-            log::info!("Pulling image: {:?}", msg);
+            let mut stream = self.docker.create_image(options.clone(), None, None);
+            while let Some(msg) = stream.try_next().await? {
+                log::info!("Pulling image: {:?}", msg);
+            }
         }
         let mut labels: HashMap<&str, &str> = HashMap::new();
         labels.insert(&self.container_label_key, &self.container_label_value);
@@ -340,36 +356,15 @@ mod tests {
         ])
         .await
         .unwrap();
-        dr.run(
-            "xbgxwh/github_star",
-            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
-            Some(vec![(
-                "/Users/xinbiguo/Documents/github_star_bot/token".into(),
-                "/github_token".into(),
-            )]),
-        )
-        .await
-        .unwrap();
-        dr.run(
-            "xbgxwh/github_star",
-            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
-            Some(vec![(
-                "/Users/xinbiguo/Documents/github_star_bot/token2".into(),
-                "/github_token".into(),
-            )]),
-        )
-        .await
-        .unwrap();
-        dr.run(
-            "xbgxwh/github_star",
-            Some(vec!["star.js", "--owner=FrontMage", "--repo=docker_runner"]),
-            Some(vec![(
-                "/Users/xinbiguo/Documents/github_star_bot/token3".into(),
-                "/github_token".into(),
-            )]),
-        )
-        .await
-        .unwrap();
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
+            .await
+            .unwrap();
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
+            .await
+            .unwrap();
+        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
+            .await
+            .unwrap();
         assert_eq!(3, dr.list_runner_containers().await.unwrap().len());
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         dr.clear_timeout_containers().await.unwrap();

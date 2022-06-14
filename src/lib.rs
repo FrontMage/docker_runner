@@ -53,6 +53,7 @@ impl DockerRunner {
         image: &str,
         cmd: Option<Vec<&str>>,
         mounts: Option<Vec<(String, String)>>,
+        extra_labels: Option<Vec<(String, String)>>,
     ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
@@ -79,8 +80,14 @@ impl DockerRunner {
                 log::info!("Pulling image: {:?}", msg);
             }
         }
-        let mut labels: HashMap<&str, &str> = HashMap::new();
-        labels.insert(&self.container_label_key, &self.container_label_value);
+        let mut labels: HashMap<String, String> = HashMap::new();
+        labels.insert(
+            self.container_label_key.clone(),
+            self.container_label_value.clone(),
+        );
+        for (tag_key, tag_value) in extra_labels.unwrap_or(vec![]) {
+            labels.insert(tag_key, tag_value);
+        }
         let host_config = HostConfig {
             cap_add: Some(vec!["SYS_ADMIN".into()]),
             auto_remove: Some(true),
@@ -104,7 +111,12 @@ impl DockerRunner {
         let cfg = Config {
             image: Some(image),
             cmd,
-            labels: Some(labels),
+            labels: Some(
+                labels
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str()))
+                    .collect::<HashMap<&str, &str>>(),
+            ),
             host_config: Some(host_config),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
@@ -135,11 +147,13 @@ impl DockerRunner {
         // set stdout in raw mode so we can do tty stuff
         let mut stdout = stdout();
 
-        // pipe docker attach output into stdout
-        while let Some(Ok(output)) = output.next().await {
-            stdout.write_all(output.into_bytes().as_ref())?;
-            stdout.flush()?;
-        }
+        tokio::spawn(async move {
+            // pipe docker attach output into stdout
+            while let Some(Ok(output)) = output.next().await {
+                stdout.write_all(output.into_bytes().as_ref()).unwrap();
+                stdout.flush().unwrap();
+            }
+        });
         Ok(resp)
     }
 
@@ -214,7 +228,7 @@ impl DockerRunner {
 
     /// Clear timeout containers and stopped containers
     pub async fn clear_timeout_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
-        for container_info in self.list_runner_containers().await? {
+        for container_info in self.list_runner_containers(None).await? {
             let container_created_timestamp = container_info.created.unwrap_or(0);
             let now = chrono::offset::Local::now().timestamp();
             if (now - container_created_timestamp) > self.max_container_running_time {
@@ -243,9 +257,34 @@ impl DockerRunner {
         Ok(())
     }
 
+    /// Clear containers by label
+    pub async fn clear_containers_by_labels(
+        &self,
+        labels: Option<Vec<String>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for container_info in self.list_runner_containers(labels).await? {
+            for name in container_info.names.unwrap() {
+                // FIXME: The return value of name is /charming_leakey with a / at the front,
+                // but the stop_container method expect a name without /
+                if let Err(e) = self
+                    .docker
+                    .stop_container(&name.trim_start_matches("/"), None)
+                    .await
+                {
+                    log::warn!("Failed to clear container {}, {:?}", name, e);
+                }
+            }
+            log::info!(
+                "Clear container {} by labels",
+                container_info.id.unwrap_or("No id found".into())
+            );
+        }
+        Ok(())
+    }
+
     /// Clear all containers
     pub async fn clear_all_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
-        for container_info in self.list_runner_containers().await? {
+        for container_info in self.list_runner_containers(None).await? {
             for name in container_info.names.unwrap() {
                 // FIXME: The return value of name is /charming_leakey with a / at the front,
                 // but the stop_container method expect a name without /
@@ -267,15 +306,17 @@ impl DockerRunner {
 
     pub async fn list_runner_containers(
         &self,
+        labels: Option<Vec<String>>,
     ) -> Result<Vec<ContainerSummary>, Box<dyn std::error::Error>> {
         let mut filters = HashMap::new();
-        filters.insert(
-            "label".to_string(),
-            vec![format!(
-                "{}={}",
-                self.container_label_key, self.container_label_value
-            )],
-        );
+        let mut labels_vec = vec![format!(
+            "{}={}",
+            self.container_label_key, self.container_label_value
+        )];
+        for label in labels.unwrap_or(vec![]) {
+            labels_vec.push(label)
+        }
+        filters.insert("label".to_string(), labels_vec);
         filters.insert("status".to_string(), vec!["running".to_string()]);
         let opts: ListContainersOptions<String> = ListContainersOptions {
             all: true,
@@ -344,30 +385,47 @@ mod tests {
         .unwrap();
         let docker = Docker::connect_with_socket_defaults().unwrap();
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
-        dr.clear_images_by_whitelist(vec![
-            // helium miner
-            "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0",
-            // oracle price
-            "sha256:2ad5168849b8efca452835a64fa687c687be82f7a13708a26f97330bdfa6d09c",
-            // wrk
-            "sha256:00af8c6b99adbadc465f42f9dcc8b0f10e397dbcae4fb71966126a0834f3a3f5",
-            // github star
-            "sha256:066003b681db10eca929503a4de0b4859468dceaaf57c30749fff77dd397bef9",
-        ])
+        // dr.clear_images_by_whitelist(vec![
+        //     // helium miner
+        //     "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0",
+        //     // oracle price
+        //     "sha256:2ad5168849b8efca452835a64fa687c687be82f7a13708a26f97330bdfa6d09c",
+        //     // wrk
+        //     "sha256:00af8c6b99adbadc465f42f9dcc8b0f10e397dbcae4fb71966126a0834f3a3f5",
+        //     // github star
+        //     "sha256:066003b681db10eca929503a4de0b4859468dceaaf57c30749fff77dd397bef9",
+        // ])
+        // .await
+        // .unwrap();
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            None,
+            Some(vec![("id".to_string(), "1".to_string())]),
+        )
         .await
         .unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
-            .await
-            .unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
-            .await
-            .unwrap();
-        dr.run("busybox:latest", Some(vec!["sleep", "100"]), None)
-            .await
-            .unwrap();
-        assert_eq!(3, dr.list_runner_containers().await.unwrap().len());
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            None,
+            Some(vec![("id".to_string(), "1".to_string())]),
+        )
+        .await
+        .unwrap();
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            None,
+            Some(vec![("id".to_string(), "2".to_string())]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(3, dr.list_runner_containers(None).await.unwrap().len());
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        dr.clear_timeout_containers().await.unwrap();
-        assert_eq!(0, dr.list_runner_containers().await.unwrap().len());
+        dr.clear_containers_by_labels(Some(vec!["id=1".into()]))
+            .await
+            .unwrap();
+        assert_eq!(1, dr.list_runner_containers(None).await.unwrap().len());
     }
 }

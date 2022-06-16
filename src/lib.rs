@@ -282,6 +282,38 @@ impl DockerRunner {
         Ok(())
     }
 
+    /// Clear containers by deadline
+    pub async fn clear_containers_by_deadline(
+        &self,
+        deadline_key: String,
+        deadline: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for container_info in self.list_runner_containers(None).await? {
+            let labels = container_info.labels.unwrap_or(HashMap::new());
+            if let Some(ddl) = labels.get(&deadline_key) {
+                let ddl_label = ddl.parse::<u64>().unwrap_or(0_u64);
+                if ddl_label != 0_u64 && ddl_label < deadline {
+                    for name in container_info.names.unwrap_or(vec![]) {
+                        // FIXME: The return value of name is /charming_leakey with a / at the front,
+                        // but the stop_container method expect a name without /
+                        if let Err(e) = self
+                            .docker
+                            .stop_container(&name.trim_start_matches("/"), None)
+                            .await
+                        {
+                            log::warn!("Failed to clear container {}, {:?}", name, e);
+                        }
+                    }
+                    log::info!(
+                        "Clear container {} by deadline",
+                        container_info.id.unwrap_or("No id found".into())
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Clear all containers
     pub async fn clear_all_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
         for container_info in self.list_runner_containers(None).await? {
@@ -424,6 +456,23 @@ mod tests {
         assert_eq!(3, dr.list_runner_containers(None).await.unwrap().len());
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         dr.clear_containers_by_labels(Some(vec!["id=1".into()]))
+            .await
+            .unwrap();
+        assert_eq!(1, dr.list_runner_containers(None).await.unwrap().len());
+        dr.run(
+            "busybox:latest",
+            Some(vec!["sleep", "100"]),
+            None,
+            Some(vec![("deadline".to_string(), "50".to_string())]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(2, dr.list_runner_containers(None).await.unwrap().len());
+        dr.clear_containers_by_deadline("deadline".into(), 10)
+            .await
+            .unwrap();
+        assert_eq!(2, dr.list_runner_containers(None).await.unwrap().len());
+        dr.clear_containers_by_deadline("deadline".into(), 60)
             .await
             .unwrap();
         assert_eq!(1, dr.list_runner_containers(None).await.unwrap().len());

@@ -93,6 +93,8 @@ impl DockerRunner {
             auto_remove: Some(true),
             // 1GB limit
             memory: Some(1073741824),
+            // for container access localhost service
+            extra_hosts: Some(vec!["host.docker.internal:host-gateway".into()]),
             mounts: Some(
                 mounts
                     .unwrap_or(vec![])
@@ -421,7 +423,7 @@ mod tests {
         //     // helium miner
         //     "sha256:9f78fc7319572294768f78381ff58eef7c0e4d49605a9f994b2fab056463dce0",
         //     // oracle price
-        //     "sha256:2ad5168849b8efca452835a64fa687c687be82f7a13708a26f97330bdfa6d09c",
+        //     "sha256:6150ce190b77e1077f7040d594f2303c28d96c135b25ad6e8c31cc4990ded3d4",
         //     // wrk
         //     "sha256:00af8c6b99adbadc465f42f9dcc8b0f10e397dbcae4fb71966126a0834f3a3f5",
         //     // github star

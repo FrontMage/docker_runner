@@ -5,7 +5,8 @@ use bollard::container::{
 use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use bollard::models::{
-    ContainerCreateResponse, ContainerSummary, EventMessage, HostConfig, Mount, MountTypeEnum,
+    ContainerCreateResponse, ContainerSummary, EventMessage, HostConfig, ImageSummary, Mount,
+    MountTypeEnum,
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
@@ -45,6 +46,16 @@ impl DockerRunner {
             container_label_value,
             max_containers,
         };
+    }
+
+    pub async fn list_images(&self) -> Result<Vec<ImageSummary>, Error> {
+        let filters: HashMap<&str, Vec<&str>> = HashMap::new();
+        let options = Some(ListImagesOptions {
+            all: false,
+            filters,
+            ..Default::default()
+        });
+        Ok(self.docker.list_images(options).await?)
     }
 
     /// Create container

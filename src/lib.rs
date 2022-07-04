@@ -48,6 +48,29 @@ impl DockerRunner {
         };
     }
 
+    pub async fn remove_image_by_name(&self, name: String) -> Result<Vec<String>, Error> {
+        let filters: HashMap<&str, Vec<&str>> = HashMap::new();
+        let options = Some(ListImagesOptions {
+            all: false,
+            filters,
+            ..Default::default()
+        });
+        let images = self.docker.list_images(options).await?;
+        let mut removed_hash = vec![];
+        for image in images {
+            if image.repo_tags.contains(&name) {
+                let remove_options = Some(RemoveImageOptions {
+                    ..Default::default()
+                });
+                removed_hash.push(image.id.clone());
+                self.docker
+                    .remove_image(&image.id, remove_options, None)
+                    .await?;
+            }
+        }
+        Ok(removed_hash)
+    }
+
     pub async fn list_images(&self) -> Result<Vec<ImageSummary>, Error> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
@@ -391,6 +414,19 @@ mod tests {
 
     use super::*;
     use std::collections::HashMap;
+    #[tokio::test]
+    async fn test_list_images() {
+        CombinedLogger::init(vec![TermLogger::new(
+            LevelFilter::Info,
+            simplelog::Config::default(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        )])
+        .unwrap();
+        let docker = Docker::connect_with_socket_defaults().unwrap();
+        let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
+        log::info!("{:?}", dr.list_images().await.unwrap());
+    }
     #[tokio::test]
     async fn test_clear_images() {
         CombinedLogger::init(vec![TermLogger::new(

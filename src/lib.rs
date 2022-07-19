@@ -311,11 +311,7 @@ impl DockerRunner {
         &self,
         labels: Option<Vec<String>>,
     ) -> Result<(), String> {
-        for container_info in self
-            .list_runner_containers(labels)
-            .await
-            .map_err(|e| format!("{:?}", e))?
-        {
+        for container_info in self.list_runner_containers(labels).await? {
             for name in container_info.names.unwrap_or(vec![]) {
                 // FIXME: The return value of name is /charming_leakey with a / at the front,
                 // but the stop_container method expect a name without /
@@ -392,7 +388,7 @@ impl DockerRunner {
     pub async fn list_runner_containers(
         &self,
         labels: Option<Vec<String>>,
-    ) -> Result<Vec<ContainerSummary>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ContainerSummary>, String> {
         let mut filters = HashMap::new();
         let mut labels_vec = vec![format!(
             "{}={}",
@@ -409,7 +405,11 @@ impl DockerRunner {
             ..Default::default()
         };
 
-        Ok(self.docker.list_containers(Some(opts)).await?)
+        Ok(self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| format!("{:?}", e))?)
     }
 
     pub async fn events(

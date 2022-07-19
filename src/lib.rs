@@ -6,7 +6,7 @@ use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use bollard::models::{
     ContainerCreateResponse, ContainerSummary, EventMessage, HostConfig, ImageSummary, Mount,
-    MountTypeEnum,
+    MountTypeEnum, PortMap,
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
@@ -88,6 +88,7 @@ impl DockerRunner {
         cmd: Option<Vec<&str>>,
         mounts: Option<Vec<(String, String)>>,
         extra_labels: Option<Vec<(String, String)>>,
+        port_bindings: Option<PortMap>,
     ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
@@ -142,6 +143,7 @@ impl DockerRunner {
                     })
                     .collect(),
             ),
+            port_bindings,
             ..Default::default()
         };
         let cfg = Config {
@@ -413,7 +415,38 @@ mod tests {
     use simplelog::*;
 
     use super::*;
+    use bollard::models::PortBinding;
     use std::collections::HashMap;
+    #[tokio::test]
+    async fn test_portmap() {
+        CombinedLogger::init(vec![TermLogger::new(
+            LevelFilter::Info,
+            simplelog::Config::default(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        )])
+        .unwrap();
+        let docker = Docker::connect_with_socket_defaults().unwrap();
+        let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
+        let mut portmap = HashMap::new();
+        portmap.insert(
+            "8080/tcp".into(),
+            Some(vec![PortBinding {
+                host_ip: Some("0.0.0.0".into()),
+                host_port: Some("8080".into()),
+            }]),
+        );
+        dr.run(
+            "xbgxwh/credentials:1.0.0",
+            Some(vec!["sleep", "100"]),
+            None,
+            Some(vec![("id".to_string(), "1".to_string())]),
+            Some(portmap),
+        )
+        .await
+        .unwrap();
+        log::info!("{:?}", dr.list_images().await.unwrap());
+    }
     #[tokio::test]
     async fn test_list_images() {
         CombinedLogger::init(vec![TermLogger::new(
@@ -438,7 +471,9 @@ mod tests {
         .unwrap();
         let docker = Docker::connect_with_socket_defaults().unwrap();
         let dr = DockerRunner::new(docker, 1, "runner_container".into(), "yes".into(), 10);
-        dr.clear_images_by_whitelist(vec![]).await.unwrap();
+        dr.remove_image_by_name("xbgxwh/oracle_price:1.0.0".to_string())
+            .await
+            .unwrap();
     }
     #[tokio::test]
     async fn test_events() {
@@ -483,6 +518,7 @@ mod tests {
             Some(vec!["sleep", "100"]),
             None,
             Some(vec![("id".to_string(), "1".to_string())]),
+            None,
         )
         .await
         .unwrap();
@@ -491,6 +527,7 @@ mod tests {
             Some(vec!["sleep", "100"]),
             None,
             Some(vec![("id".to_string(), "1".to_string())]),
+            None,
         )
         .await
         .unwrap();
@@ -499,6 +536,7 @@ mod tests {
             Some(vec!["sleep", "100"]),
             None,
             Some(vec![("id".to_string(), "2".to_string())]),
+            None,
         )
         .await
         .unwrap();
@@ -513,6 +551,7 @@ mod tests {
             Some(vec!["sleep", "100"]),
             None,
             Some(vec![("deadline".to_string(), "50".to_string())]),
+            None,
         )
         .await
         .unwrap();

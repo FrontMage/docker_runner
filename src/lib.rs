@@ -90,14 +90,18 @@ impl DockerRunner {
         mounts: Option<Vec<(String, String)>>,
         extra_labels: Option<Vec<(String, String)>>,
         port_bindings: Option<PortMap>,
-    ) -> Result<ContainerCreateResponse, Box<dyn std::error::Error>> {
+    ) -> Result<ContainerCreateResponse, String> {
         let filters: HashMap<&str, Vec<&str>> = HashMap::new();
         let options = Some(ListImagesOptions {
             all: false,
             filters,
             ..Default::default()
         });
-        let images = self.docker.list_images(options).await?;
+        let images = self
+            .docker
+            .list_images(options)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
         // Pull image if image is not already exitsting
         if !images
             .iter()
@@ -112,7 +116,7 @@ impl DockerRunner {
             });
 
             let mut stream = self.docker.create_image(options.clone(), None, None);
-            while let Some(msg) = stream.try_next().await? {
+            while let Some(msg) = stream.try_next().await.map_err(|e| format!("{:?}", e))? {
                 log::info!("Pulling image: {:?}", msg);
             }
         }
@@ -162,10 +166,15 @@ impl DockerRunner {
             ..Default::default()
         };
         let options: Option<CreateContainerOptions<&str>> = None;
-        let resp = self.docker.create_container(options, cfg).await?;
+        let resp = self
+            .docker
+            .create_container(options, cfg)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
         self.docker
             .start_container(&resp.id, None::<StartContainerOptions<String>>)
-            .await?;
+            .await
+            .map_err(|e| format!("{:?}", e))?;
 
         let AttachContainerResults {
             mut output,
@@ -181,7 +190,8 @@ impl DockerRunner {
                     ..Default::default()
                 }),
             )
-            .await?;
+            .await
+            .map_err(|e| format!("{:?}", e))?;
 
         // set stdout in raw mode so we can do tty stuff
         let mut stdout = stdout();

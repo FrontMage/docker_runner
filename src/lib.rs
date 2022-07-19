@@ -300,8 +300,12 @@ impl DockerRunner {
     pub async fn clear_containers_by_labels(
         &self,
         labels: Option<Vec<String>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for container_info in self.list_runner_containers(labels).await? {
+    ) -> Result<(), String> {
+        for container_info in self
+            .list_runner_containers(labels)
+            .await
+            .map_err(|e| format!("{:?}", e))?
+        {
             for name in container_info.names.unwrap_or(vec![]) {
                 // FIXME: The return value of name is /charming_leakey with a / at the front,
                 // but the stop_container method expect a name without /

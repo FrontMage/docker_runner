@@ -10,6 +10,7 @@ use bollard::models::{
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
+pub use bollard::models::PortBinding;
 use chrono::{Duration, Utc};
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use std::io::{stdout, Write};

@@ -4,13 +4,13 @@ use bollard::container::{
 };
 use bollard::errors::Error;
 use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
+pub use bollard::models::PortBinding;
 use bollard::models::{
     ContainerCreateResponse, ContainerSummary, EventMessage, HostConfig, ImageSummary, Mount,
     MountTypeEnum, PortMap,
 };
 use bollard::system::EventsOptions;
 pub use bollard::Docker;
-pub use bollard::models::PortBinding;
 use chrono::{Duration, Utc};
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use std::io::{stdout, Write};
@@ -302,7 +302,7 @@ impl DockerRunner {
         labels: Option<Vec<String>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         for container_info in self.list_runner_containers(labels).await? {
-            for name in container_info.names.unwrap() {
+            for name in container_info.names.unwrap_or(vec![]) {
                 // FIXME: The return value of name is /charming_leakey with a / at the front,
                 // but the stop_container method expect a name without /
                 if let Err(e) = self
